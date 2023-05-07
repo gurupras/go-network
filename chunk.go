@@ -15,3 +15,24 @@ type WritePacket interface {
 	SetCallback(cb WritePacketCallback)
 	GetCallback() WritePacketCallback
 }
+
+type writePacket struct {
+	data interface{}
+	cb   WritePacketCallback
+}
+
+func (w *writePacket) SetData(data interface{}) {
+	w.data = data
+}
+
+func (w *writePacket) GetData() interface{} {
+	return w.data
+}
+
+func (w *writePacket) SetCallback(cb WritePacketCallback) {
+	w.cb = cb
+}
+
+func (w *writePacket) GetCallback() WritePacketCallback {
+	return w.cb
+}

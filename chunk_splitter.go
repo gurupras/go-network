@@ -16,10 +16,10 @@ type ChunkSplitter struct {
 	mutex           sync.Mutex
 }
 
-func NewChunkSplitter(name string, maxPacketSize int, marshaler Marshaler, createPacket func() WritePacket, outChan chan<- WritePacket) *ChunkSplitter {
+func NewChunkSplitter(name string, maxPacketSize int, marshaler Marshaler, outChan chan<- WritePacket) *ChunkSplitter {
 	writePacketPool := &sync.Pool{
 		New: func() any {
-			return createPacket()
+			return &writePacket{}
 		},
 	}
 
