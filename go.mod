@@ -1,4 +1,4 @@
-module github.com/gurupras/network
+module github.com/gurupras/go-network
 
 go 1.19
 
