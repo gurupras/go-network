@@ -34,7 +34,7 @@ func NewChunkSplitter(name string, maxPacketSize int, marshaler Marshaler, outCh
 	}
 }
 
-func (c *ChunkSplitter) Encode(v interface{}) error {
+func (c *ChunkSplitter) SplitToChannel(v interface{}, outChan chan<- WritePacket) error {
 	encodedBytes, err := c.marshaler.Marshal(v)
 	if err != nil {
 		return err
@@ -77,7 +77,7 @@ func (c *ChunkSplitter) Encode(v interface{}) error {
 		writePkt := c.writePacketPool.Get().(WritePacket)
 		writePkt.SetData(chunk)
 		writePkt.SetCallback(callback)
-		c.outChan <- writePkt
+		outChan <- writePkt
 		func() {
 			mutex.Lock()
 			defer mutex.Unlock()
@@ -90,4 +90,8 @@ func (c *ChunkSplitter) Encode(v interface{}) error {
 		return err
 	}
 	return nil
+}
+
+func (c *ChunkSplitter) Encode(v interface{}) error {
+	return c.SplitToChannel(v, c.outChan)
 }
