@@ -83,6 +83,7 @@ func (c *ChunkCombiner) AddReader(reader io.Reader, name string) error {
 			}
 			return err
 		}
+		var completePacketChunks *PacketChunks
 		func() {
 			c.mutex.Lock()
 			defer c.mutex.Unlock()
@@ -102,17 +103,21 @@ func (c *ChunkCombiner) AddReader(reader io.Reader, name string) error {
 			packetChunks.AddChunk(&chunk)
 
 			if packetChunks.Complete() {
-				fragmentedBytesBuffer := fragmentedbuf.New()
-				// We need to combine all the chunks
-				total, _ := packetChunks.Total()
-				for idx := uint64(0); idx < total; idx++ {
-					c := packetChunks.data[idx]
-					fragmentedBytesBuffer.Write(c.Data)
-				}
-				delete(c.partialPackets, chunk.ID)
-				c.outChan <- fragmentedBytesBuffer
+				completePacketChunks = packetChunks
 			}
 		}()
+		if completePacketChunks != nil {
+			// We don't need to mutex for this because nobody else is going to be accessing this
+			fragmentedBytesBuffer := fragmentedbuf.New()
+			// We need to combine all the chunks
+			total, _ := completePacketChunks.Total()
+			for idx := uint64(0); idx < total; idx++ {
+				c := completePacketChunks.data[idx]
+				fragmentedBytesBuffer.Write(c.Data)
+			}
+			delete(c.partialPackets, chunk.ID)
+			c.outChan <- fragmentedBytesBuffer
+		}
 	}
 	return nil
 }
