@@ -13,6 +13,7 @@ import (
 type PacketChunks struct {
 	data        map[uint64]*Chunk
 	totalChunks *uint64
+	mutex       sync.Mutex
 }
 
 func (c *PacketChunks) AddChunk(chunk *Chunk) {
@@ -83,7 +84,8 @@ func (c *ChunkCombiner) AddReader(reader io.Reader, name string) error {
 			}
 			return err
 		}
-		var completePacketChunks *PacketChunks
+		isComplete := false
+		var packetChunks *PacketChunks
 		func() {
 			c.mutex.Lock()
 			defer c.mutex.Unlock()
@@ -91,31 +93,42 @@ func (c *ChunkCombiner) AddReader(reader io.Reader, name string) error {
 				breakLoop = true
 				return
 			}
-			packetChunks, ok := c.partialPackets[chunk.ID]
+			var ok bool
+			packetChunks, ok = c.partialPackets[chunk.ID]
 			if !ok {
 				// Create a new partial packet
 				packetChunks = &PacketChunks{
-					data: make(map[uint64]*Chunk),
+					data:  make(map[uint64]*Chunk),
+					mutex: sync.Mutex{},
 				}
 				c.partialPackets[chunk.ID] = packetChunks
 			}
+		}()
+
+		func() {
 			// Add current chunk to the partial packet's chunks
+			packetChunks.mutex.Lock()
+			defer packetChunks.mutex.Unlock()
 			packetChunks.AddChunk(&chunk)
 
 			if packetChunks.Complete() {
-				completePacketChunks = packetChunks
+				isComplete = true
 			}
 		}()
-		if completePacketChunks != nil {
+		if isComplete {
+			func() {
+				c.mutex.Lock()
+				defer c.mutex.Unlock()
+				delete(c.partialPackets, chunk.ID)
+			}()
 			// We don't need to mutex for this because nobody else is going to be accessing this
 			fragmentedBytesBuffer := fragmentedbuf.New()
 			// We need to combine all the chunks
-			total, _ := completePacketChunks.Total()
+			total, _ := packetChunks.Total()
 			for idx := uint64(0); idx < total; idx++ {
-				c := completePacketChunks.data[idx]
+				c := packetChunks.data[idx]
 				fragmentedBytesBuffer.Write(c.Data)
 			}
-			delete(c.partialPackets, chunk.ID)
 			c.outChan <- fragmentedBytesBuffer
 		}
 	}
