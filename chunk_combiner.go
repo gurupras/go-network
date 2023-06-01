@@ -41,17 +41,17 @@ func (c *PacketChunks) Complete() bool {
 
 type ChunkCombiner struct {
 	name           string
-	createDecoder  CreateDecoder
+	deserializer   Deserializer
 	mutex          sync.Mutex
 	partialPackets map[uint64]*PacketChunks
 	outChan        chan<- io.Reader
 	stopped        bool
 }
 
-func NewChunkCombiner(name string, createDecoder CreateDecoder, outChan chan<- io.Reader) *ChunkCombiner {
+func NewChunkCombiner(name string, deserializer Deserializer, outChan chan<- io.Reader) *ChunkCombiner {
 	return &ChunkCombiner{
 		name:           name,
-		createDecoder:  createDecoder,
+		deserializer:   deserializer,
 		mutex:          sync.Mutex{},
 		partialPackets: make(map[uint64]*PacketChunks),
 		outChan:        outChan,
@@ -68,7 +68,7 @@ func (c *ChunkCombiner) Close() {
 
 // Ideally, you will run this within a goroutine
 func (c *ChunkCombiner) AddReader(reader io.Reader, name string) error {
-	chunkDecoder := c.createDecoder.CreateDecoder(reader)
+	chunkDecoder := c.deserializer.CreateDecoder(reader)
 	breakLoop := false
 	for {
 		var chunk Chunk
@@ -84,8 +84,7 @@ func (c *ChunkCombiner) AddReader(reader io.Reader, name string) error {
 			}
 			return err
 		}
-		isComplete := false
-		var packetChunks *PacketChunks
+		c.AddChunk(&chunk)
 		func() {
 			c.mutex.Lock()
 			defer c.mutex.Unlock()
@@ -93,44 +92,66 @@ func (c *ChunkCombiner) AddReader(reader io.Reader, name string) error {
 				breakLoop = true
 				return
 			}
-			var ok bool
-			packetChunks, ok = c.partialPackets[chunk.ID]
-			if !ok {
-				// Create a new partial packet
-				packetChunks = &PacketChunks{
-					data:  make(map[uint64]*Chunk),
-					mutex: sync.Mutex{},
-				}
-				c.partialPackets[chunk.ID] = packetChunks
-			}
 		}()
-
-		func() {
-			// Add current chunk to the partial packet's chunks
-			packetChunks.mutex.Lock()
-			defer packetChunks.mutex.Unlock()
-			packetChunks.AddChunk(&chunk)
-
-			if packetChunks.Complete() {
-				isComplete = true
-			}
-		}()
-		if isComplete {
-			func() {
-				c.mutex.Lock()
-				defer c.mutex.Unlock()
-				delete(c.partialPackets, chunk.ID)
-			}()
-			// We don't need to mutex for this because nobody else is going to be accessing this
-			fragmentedBytesBuffer := fragmentedbuf.New()
-			// We need to combine all the chunks
-			total, _ := packetChunks.Total()
-			for idx := uint64(0); idx < total; idx++ {
-				c := packetChunks.data[idx]
-				fragmentedBytesBuffer.Write(c.Data)
-			}
-			c.outChan <- fragmentedBytesBuffer
-		}
 	}
 	return nil
+}
+
+func (c *ChunkCombiner) ProcessIncomingBytes(b []byte) error {
+	var chunk Chunk
+	err := c.deserializer.Unmarshal(b, &chunk)
+	if err != nil {
+		return err
+	}
+	c.AddChunk(&chunk)
+	return nil
+}
+
+func (c *ChunkCombiner) AddChunk(chunk *Chunk) {
+	isComplete := false
+	var packetChunks *PacketChunks
+	func() {
+		c.mutex.Lock()
+		defer c.mutex.Unlock()
+		if c.stopped {
+			return
+		}
+		var ok bool
+		packetChunks, ok = c.partialPackets[chunk.ID]
+		if !ok {
+			// Create a new partial packet
+			packetChunks = &PacketChunks{
+				data:  make(map[uint64]*Chunk),
+				mutex: sync.Mutex{},
+			}
+			c.partialPackets[chunk.ID] = packetChunks
+		}
+	}()
+
+	func() {
+		// Add current chunk to the partial packet's chunks
+		packetChunks.mutex.Lock()
+		defer packetChunks.mutex.Unlock()
+		packetChunks.AddChunk(chunk)
+
+		if packetChunks.Complete() {
+			isComplete = true
+		}
+	}()
+	if isComplete {
+		func() {
+			c.mutex.Lock()
+			defer c.mutex.Unlock()
+			delete(c.partialPackets, chunk.ID)
+		}()
+		// We don't need to mutex for this because nobody else is going to be accessing this
+		fragmentedBytesBuffer := fragmentedbuf.New()
+		// We need to combine all the chunks
+		total, _ := packetChunks.Total()
+		for idx := uint64(0); idx < total; idx++ {
+			c := packetChunks.data[idx]
+			fragmentedBytesBuffer.Write(c.Data)
+		}
+		c.outChan <- fragmentedBytesBuffer
+	}
 }
