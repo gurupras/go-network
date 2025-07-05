@@ -6,7 +6,7 @@ import (
 	"sync"
 )
 
-type writeCallback func(data interface{}) error
+type WriteCallback func(data interface{}) error
 
 type ChunkedTransport struct {
 	name           string
@@ -16,11 +16,11 @@ type ChunkedTransport struct {
 	combiner       ChunkCombinerInterface
 	sendChan       chan WritePacket
 	recvChan       chan io.Reader
-	write          writeCallback
+	write          WriteCallback
 	wg             sync.WaitGroup
 }
 
-func New(name string, packetSize int, serde SerDe, write writeCallback) *ChunkedTransport {
+func New(name string, packetSize int, serde SerDe, write WriteCallback) *ChunkedTransport {
 	sendChan := make(chan WritePacket)
 	recvChan := make(chan io.Reader)
 
