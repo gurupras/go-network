@@ -10,6 +10,11 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+type ChunkCombinerInterface interface {
+	io.Closer
+	ProcessIncomingBytes(b []byte) error
+}
+
 type PacketChunks struct {
 	data        map[uint64]*Chunk
 	totalChunks *uint64
@@ -59,14 +64,15 @@ func NewChunkCombiner(name string, deserializer Deserializer, outChan chan<- io.
 	}
 }
 
-func (c *ChunkCombiner) Close() {
+func (c *ChunkCombiner) Close() error {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	c.stopped = true
 	close(c.outChan)
+	return nil
 }
 
-// Ideally, you will run this within a goroutine
+// Ideally, you will run this within a goroutine. Unused and un-tested
 func (c *ChunkCombiner) AddReader(reader io.Reader, name string) error {
 	chunkDecoder := c.deserializer.CreateDecoder(reader)
 	breakLoop := false
@@ -84,7 +90,7 @@ func (c *ChunkCombiner) AddReader(reader io.Reader, name string) error {
 			}
 			return err
 		}
-		c.AddChunk(&chunk)
+		c.addChunk(&chunk)
 		func() {
 			c.mutex.Lock()
 			defer c.mutex.Unlock()
@@ -103,11 +109,11 @@ func (c *ChunkCombiner) ProcessIncomingBytes(b []byte) error {
 	if err != nil {
 		return err
 	}
-	c.AddChunk(&chunk)
+	c.addChunk(&chunk)
 	return nil
 }
 
-func (c *ChunkCombiner) AddChunk(chunk *Chunk) {
+func (c *ChunkCombiner) addChunk(chunk *Chunk) {
 	isComplete := false
 	var packetChunks *PacketChunks
 	func() {
