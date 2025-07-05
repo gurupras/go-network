@@ -71,7 +71,10 @@ func (c *ChunkedTransport) Send(data interface{}) error {
 
 // Read a full "packet" out of the network
 func (c *ChunkedTransport) ReadPacket(pkt interface{}) error {
-	reader := <-c.recvChan
+	reader, ok := <-c.recvChan
+	if !ok {
+		return io.EOF
+	}
 	data, err := io.ReadAll(reader)
 	if err != nil {
 		return fmt.Errorf("[%v]: failed to read incoming packet: %v", c.name, err)
